@@ -1,0 +1,16 @@
+[package]
+name = "circle_save_contracts"
+version = "1.0.0"
+authors = []
+
+[addresses]
+circle_save_contracts = "_"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/movementlabsxyz/aptos-core.git"
+rev = "movement"
+subdir = "aptos-move/framework/aptos-framework"
+
+[dev-dependencies]

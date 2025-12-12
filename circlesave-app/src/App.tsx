@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Home, Bell, User, Search, Settings, ChevronRight, Building2, Car, X, ArrowLeft } from 'lucide-react';
 
 // Types
@@ -68,7 +68,7 @@ const Header = ({ activeTab }: { activeTab: string }) => (
   </div>
 );
 
-const HomePage = ({ onNavigate }: { onNavigate: (view: string) => void }) => (
+const HomePage = () => (
   <div className="max-w-md mx-auto bg-gray-50 min-h-screen">
     <div className="bg-white p-6">
       <div className="flex items-center justify-between mb-6">
@@ -340,22 +340,19 @@ const CircleDetailsPage = ({ onBack }: { onBack: () => void }) => (
 // Main App Component
 export default function App() {
   const [currentView, setCurrentView] = useState<'home' | 'circles' | 'details'>('home');
-  const [selectedCircleId, setSelectedCircleId] = useState<string | null>(null);
 
-  const handleNavigate = (view: string, circleId?: string) => {
+  const handleNavigate = (view: string, _circleId?: string) => {
     setCurrentView(view as 'home' | 'circles' | 'details');
-    if (circleId) setSelectedCircleId(circleId);
   };
 
   const handleBack = () => {
     setCurrentView('circles');
-    setSelectedCircleId(null);
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Header activeTab={currentView === 'details' ? 'circles' : currentView} />
-      {currentView === 'home' && <HomePage onNavigate={handleNavigate} />}
+      {currentView === 'home' && <HomePage />}
       {currentView === 'circles' && <MyCirclesPage onNavigate={handleNavigate} />}
       {currentView === 'details' && <CircleDetailsPage onBack={handleBack} />}
     </div>
