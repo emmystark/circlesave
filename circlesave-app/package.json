@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run build && ts-node --esm --transpile-only backend/server.ts",
+    "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "start": "ts-node --esm --transpile-only backend/server.ts"
+    "start": "tsx backend/server.ts"
   },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.0",
@@ -21,6 +21,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@prisma/client": "^7.1.0",
+    "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.16.0",
@@ -41,6 +42,7 @@
     "tailwindcss": "^3.4.18",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4"
