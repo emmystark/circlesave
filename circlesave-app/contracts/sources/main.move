@@ -13,9 +13,11 @@ module circle_save_contracts::main {
     const E_INSUFFICIENT_BALANCE: u64 = 2;
     const E_CIRCLE_NOT_FOUND: u64 = 3;
     const E_CYCLE_NOT_ENDED: u64 = 4;
+    const E_WITHDRAWAL_FAILED: u64 = 5;
 
     struct ModuleData has key {
         signer_cap: SignerCapability,
+        admin: address,  // Your backend address for off-chain operations
     }
 
     #[event]
@@ -23,6 +25,22 @@ module circle_save_contracts::main {
         circle_id: u64,
         creator: address,
         end_cycle: u64,
+    }
+
+    #[event]
+    struct DepositRecorded has drop, store {
+        circle_id: u64,
+        user: address,
+        amount: u64,
+        payment_reference: String,
+    }
+
+    #[event]
+    struct WithdrawalRequested has drop, store {
+        circle_id: u64,
+        user: address,
+        amount: u64,
+        withdrawal_type: u8,  // 1 = USDC, 2 = Fiat
     }
 
     struct Circle has store {
@@ -33,15 +51,13 @@ module circle_save_contracts::main {
         start_cycle: u64,
         end_cycle: u64,
         total_amount: u64,
-        status: u8,
-        distribution_index: u64,
-        is_distribution_complete: bool,
+        status: u8,  // 0 = Active, 1 = Ended, 2 = Closed
     }
 
     struct Vault has store {
         id: u64,
         created_at: u64,
-        total_balance: u64,
+        total_balance: u64,  // Virtual balance (not actual USDC locked)
         contributors_balance: Table<address, u64>,
     }
 
@@ -57,7 +73,10 @@ module circle_save_contracts::main {
             b"circle_save_seed"
         );
         
-        move_to(deployer, ModuleData { signer_cap: resource_signer_cap });
+        move_to(deployer, ModuleData { 
+            signer_cap: resource_signer_cap,
+            admin: signer::address_of(deployer),
+        });
         
         move_to(&resource_signer, Registry {
             circles: table::new(),
@@ -74,7 +93,7 @@ module circle_save_contracts::main {
         creator: &signer,
         circle_name: String,
         end_cycle_days: u64
-    ) acquires Registry {  
+    ) acquires Registry {
         let resource_addr = get_resource_account_address();
         let registry = borrow_global_mut<Registry>(resource_addr);
         let time = timestamp::now_seconds();
@@ -99,15 +118,12 @@ module circle_save_contracts::main {
             start_cycle: time,
             end_cycle: end_time,
             total_amount: 0,
-            status: 0, // 0 - ongoing, 1 - completed
-            distribution_index: 0,
-            is_distribution_complete: false,
+            status: 0,
         };
         
         table::add(&mut registry.vaults, reg_id, vault);
         table::add(&mut registry.circles, reg_id, circle);
 
-        
         event::emit(CircleCreated {
             circle_id: reg_id,
             creator: signer::address_of(creator),
@@ -117,12 +133,19 @@ module circle_save_contracts::main {
         registry.counter = registry.counter + 1;
     }
 
-    public entry fun deposit_to_circle(
-        user: &signer,
+    // Called by Backend after Monnify confirms payment
+    // This just updates virtual balance - no actual USDC transfer
+    public entry fun record_fiat_deposit(
+        admin: &signer,
         circle_id: u64,
-        amount: u64
-    ) acquires Registry {
-        let user_addr = signer::address_of(user);
+        user_address: address,
+        amount: u64,
+        payment_reference: String,
+    ) acquires ModuleData, Registry {
+        // Verify caller is admin (your backend)
+        let module_data = borrow_global<ModuleData>(@circle_save_contracts);
+        assert!(signer::address_of(admin) == module_data.admin, E_NOT_AUTHORIZED);
+        
         let resource_addr = get_resource_account_address();
         let registry = borrow_global_mut<Registry>(resource_addr);
         
@@ -130,71 +153,126 @@ module circle_save_contracts::main {
         let circle = table::borrow_mut(&mut registry.circles, circle_id);
         let vault = table::borrow_mut(&mut registry.vaults, circle_id);
         
-
-        let usdc_balance = coin::balance<AptosCoin>(user_addr);
-        assert!(usdc_balance >= amount, E_INSUFFICIENT_BALANCE);
-        
-        coin::transfer<AptosCoin>(user, resource_addr, amount);
-    
-        if (table::contains(&vault.contributors_balance, user_addr)) {
-            let balance = table::borrow_mut(&mut vault.contributors_balance, user_addr);
+        // Update virtual balance
+        if (table::contains(&vault.contributors_balance, user_address)) {
+            let balance = table::borrow_mut(&mut vault.contributors_balance, user_address);
             *balance = *balance + amount;
         } else {
-            table::add(&mut vault.contributors_balance, user_addr, amount);
-            vector::push_back(&mut circle.contributors, user_addr);
+            table::add(&mut vault.contributors_balance, user_address, amount);
+            vector::push_back(&mut circle.contributors, user_address);
         };
 
         vault.total_balance = vault.total_balance + amount;
         circle.total_amount = circle.total_amount + amount;
+
+        event::emit(DepositRecorded {
+            circle_id,
+            user: user_address,
+            amount,
+            payment_reference,
+        });
     }
 
-    public entry fun distribute_batch(
+    // Withdraw as USDC to user's wallet
+    public entry fun withdraw_as_usdc(
+        user: &signer,
         circle_id: u64,
-        batch_size: u64,
+        amount: u64,
     ) acquires ModuleData, Registry {
+        let user_addr = signer::address_of(user);
         let resource_addr = get_resource_account_address();
+        
         let module_data = borrow_global<ModuleData>(@circle_save_contracts);
         let resource_signer = account::create_signer_with_capability(&module_data.signer_cap);
         
         let registry = borrow_global_mut<Registry>(resource_addr);
+        
+        assert!(table::contains(&registry.circles, circle_id), E_CIRCLE_NOT_FOUND);
         let circle = table::borrow_mut(&mut registry.circles, circle_id);
         let vault = table::borrow_mut(&mut registry.vaults, circle_id);
         
+        // Check cycle ended
         let current_time = timestamp::now_seconds();
         assert!(current_time >= circle.end_cycle, E_CYCLE_NOT_ENDED);
         
-        let total_contributors = vector::length(&circle.contributors);
-        let start_index = circle.distribution_index;
-        let end_index = if (start_index + batch_size > total_contributors) {
-            total_contributors
+        // Check user has balance
+        assert!(table::contains(&vault.contributors_balance, user_addr), E_NOT_AUTHORIZED);
+        let user_balance = table::borrow_mut(&mut vault.contributors_balance, user_addr);
+        assert!(*user_balance >= amount, E_INSUFFICIENT_BALANCE);
+        
+        // Update balances
+        *user_balance = *user_balance - amount;
+        vault.total_balance = vault.total_balance - amount;
+        
+        // Transfer REAL USDC from resource account to user
+        coin::transfer<AptosCoin>(&resource_signer, user_addr, amount);
+
+        event::emit(WithdrawalRequested {
+            circle_id,
+            user: user_addr,
+            amount,
+            withdrawal_type: 1,  // USDC
+        });
+    }
+
+    // This is called AFTER your backend successfully transfers via Monnify
+    public entry fun confirm_fiat_withdrawal(
+        admin: &signer,
+        circle_id: u64,
+        user_address: address,
+        amount: u64,
+    ) acquires ModuleData, Registry {
+        // Verify caller is admin (backend)
+        let module_data = borrow_global<ModuleData>(@circle_save_contracts);
+        assert!(signer::address_of(admin) == module_data.admin, E_NOT_AUTHORIZED);
+        
+        let resource_addr = get_resource_account_address();
+        let registry = borrow_global_mut<Registry>(resource_addr);
+        
+        assert!(table::contains(&registry.circles, circle_id), E_CIRCLE_NOT_FOUND);
+        let circle = table::borrow_mut(&mut registry.circles, circle_id);
+        let vault = table::borrow_mut(&mut registry.vaults, circle_id);
+        
+        // Check cycle ended
+        let current_time = timestamp::now_seconds();
+        assert!(current_time >= circle.end_cycle, E_CYCLE_NOT_ENDED);
+        
+        // Check user has balance
+        assert!(table::contains(&vault.contributors_balance, user_address), E_NOT_AUTHORIZED);
+        let user_balance = table::borrow_mut(&mut vault.contributors_balance, user_address);
+        assert!(*user_balance >= amount, E_INSUFFICIENT_BALANCE);
+        
+        // Update balances (NO USDC transfer, already sent via Monnify)
+        *user_balance = *user_balance - amount;
+        vault.total_balance = vault.total_balance - amount;
+
+        event::emit(WithdrawalRequested {
+            circle_id,
+            user: user_address,
+            amount,
+            withdrawal_type: 2,  // Fiat
+        });
+    }
+
+    #[view]
+    public fun get_user_balance(circle_id: u64, user: address): u64 acquires Registry {
+        let resource_addr = get_resource_account_address();
+        let registry = borrow_global<Registry>(resource_addr);
+        let vault = table::borrow(&registry.vaults, circle_id);
+        
+        if (table::contains(&vault.contributors_balance, user)) {
+            *table::borrow(&vault.contributors_balance, user)
         } else {
-            start_index + batch_size
-        };
-        
-        let i = start_index;
-        while (i < end_index) {
-            let contributor = *vector::borrow(&circle.contributors, i);
-            
-            if (table::contains(&vault.contributors_balance, contributor)) {
-                let user_balance = *table::borrow(&vault.contributors_balance, contributor);
-                
-                if (user_balance > 0) {
-                    coin::transfer<AptosCoin>(&resource_signer, contributor, user_balance);
-                    vault.total_balance = vault.total_balance - user_balance;
-                    
-                    let balance_ref = table::borrow_mut(&mut vault.contributors_balance, contributor);
-                    *balance_ref = 0;
-                }
-            };
-            
-            i = i + 1;
-        };
-        
-        circle.distribution_index = end_index;
-        
-        if (end_index >= total_contributors) {
-            circle.is_distribution_complete = true;
-            circle.status = 2;
+            0
         }
+    }
+
+    #[view]
+    public fun get_circle_info(circle_id: u64): (String, address, u64, u64, u64, u8) acquires Registry {
+        let resource_addr = get_resource_account_address();
+        let registry = borrow_global<Registry>(resource_addr);
+        let circle = table::borrow(&registry.circles, circle_id);
+        
+        (circle.name, circle.creator, circle.start_cycle, circle.end_cycle, circle.total_amount, circle.status)
     }
 }
