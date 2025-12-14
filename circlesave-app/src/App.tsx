@@ -1,22 +1,19 @@
-import React from 'react';
+import { SignedIn, SignedOut } from '@clerk/clerk-react';
 import CircleSaveApp from './components/CircleSaveApp';
-
-
-
-import './App.css'
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+import { SignInPage } from './components/SignInPage';
+import './App.css';
 
 function App() {
   return (
-    <header>
+    <div>
       <SignedOut>
-        <SignInButton />
+        <SignInPage />
       </SignedOut>
       <SignedIn>
         <CircleSaveApp />
       </SignedIn>
-    </header>
+    </div>
   );
 }
 
-export default App
+export default App;

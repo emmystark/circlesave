@@ -1,4 +1,6 @@
-import { Bell, User } from 'lucide-react';
+import { Bell } from 'lucide-react';
+import { UserButton } from '@clerk/clerk-react';
+
 
 interface NavigationProps {
   currentPage: string;
@@ -49,7 +51,7 @@ export default function Navigation({ currentPage, setCurrentPage }: NavigationPr
           <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></span>
         </button>
         <button className="text-gray-600 hover:text-gray-900">
-          <User size={20} />
+          <UserButton/>
         </button>
       </div>
     </div>
