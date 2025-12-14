@@ -11,6 +11,9 @@ importers:
       '@aptos-labs/ts-sdk':
         specifier: ^5.2.0
         version: 5.2.0(got@11.8.6)
+      '@clerk/clerk-react':
+        specifier: ^5.58.1
+        version: 5.58.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@clerk/nextjs':
         specifier: ^6.36.2
         version: 6.36.2(next@16.0.10(@babel/core@7.28.5)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
