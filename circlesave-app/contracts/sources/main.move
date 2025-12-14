@@ -31,8 +31,7 @@ module circle_save_contracts::main {
     struct DepositRecorded has drop, store {
         circle_id: u64,
         user: address,
-        amount: u64,
-        payment_reference: String,
+        vault_balance: u64,
     }
 
     #[event]
@@ -50,14 +49,13 @@ module circle_save_contracts::main {
         contributors: vector<address>,
         start_cycle: u64,
         end_cycle: u64,
-        total_amount: u64,
         status: u8,  // 0 = Active, 1 = Ended, 2 = Closed
     }
 
     struct Vault has store {
         id: u64,
         created_at: u64,
-        total_balance: u64,  // Virtual balance (not actual USDC locked)
+        total_balance: u64,
         contributors_balance: Table<address, u64>,
     }
 
@@ -117,7 +115,6 @@ module circle_save_contracts::main {
             contributors: vector::empty(),
             start_cycle: time,
             end_cycle: end_time,
-            total_amount: 0,
             status: 0,
         };
         
@@ -133,50 +130,47 @@ module circle_save_contracts::main {
         registry.counter = registry.counter + 1;
     }
 
-    // Called by Backend after Monnify confirms payment
-    // This just updates virtual balance - no actual USDC transfer
-    public entry fun record_fiat_deposit(
-        admin: &signer,
-        circle_id: u64,
-        user_address: address,
-        amount: u64,
-        payment_reference: String,
-    ) acquires ModuleData, Registry {
-        // Verify caller is admin (your backend)
-        let module_data = borrow_global<ModuleData>(@circle_save_contracts);
-        assert!(signer::address_of(admin) == module_data.admin, E_NOT_AUTHORIZED);
-        
+
+    public entry fun deposit_to_circle(
+        user: &signer,
+        circles_id: u64,
+        amount: u64
+    ) acquires Registry {
+        let user_addr = signer::address_of(user);
         let resource_addr = get_resource_account_address();
         let registry = borrow_global_mut<Registry>(resource_addr);
         
-        assert!(table::contains(&registry.circles, circle_id), E_CIRCLE_NOT_FOUND);
-        let circle = table::borrow_mut(&mut registry.circles, circle_id);
-        let vault = table::borrow_mut(&mut registry.vaults, circle_id);
+        assert!(table::contains(&registry.circles, circles_id), E_CIRCLE_NOT_FOUND);
+        let circle = table::borrow_mut(&mut registry.circles, circles_id);
+        let vault = table::borrow_mut(&mut registry.vaults, circles_id);
+
         
-        // Update virtual balance
-        if (table::contains(&vault.contributors_balance, user_address)) {
-            let balance = table::borrow_mut(&mut vault.contributors_balance, user_address);
+        let usdc_balance = coin::balance<AptosCoin>(user_addr);
+        assert!(usdc_balance >= amount, E_INSUFFICIENT_BALANCE);
+        
+        coin::transfer<AptosCoin>(user, resource_addr, amount);
+    
+        if (table::contains(&vault.contributors_balance, user_addr)) {
+            let balance = table::borrow_mut(&mut vault.contributors_balance, user_addr);
             *balance = *balance + amount;
         } else {
-            table::add(&mut vault.contributors_balance, user_address, amount);
-            vector::push_back(&mut circle.contributors, user_address);
+            table::add(&mut vault.contributors_balance, user_addr, amount);
+            vector::push_back(&mut circle.contributors, user_addr);
         };
 
         vault.total_balance = vault.total_balance + amount;
-        circle.total_amount = circle.total_amount + amount;
 
-        event::emit(DepositRecorded {
-            circle_id,
-            user: user_address,
-            amount,
-            payment_reference,
+         event::emit(DepositRecorded {
+            circle_id: circles_id,
+            user: user_addr,
+            vault_balance: vault.total_balance,
         });
     }
 
     // Withdraw as USDC to user's wallet
     public entry fun withdraw_as_usdc(
         user: &signer,
-        circle_id: u64,
+        circles_id: u64,
         amount: u64,
     ) acquires ModuleData, Registry {
         let user_addr = signer::address_of(user);
@@ -187,9 +181,9 @@ module circle_save_contracts::main {
         
         let registry = borrow_global_mut<Registry>(resource_addr);
         
-        assert!(table::contains(&registry.circles, circle_id), E_CIRCLE_NOT_FOUND);
-        let circle = table::borrow_mut(&mut registry.circles, circle_id);
-        let vault = table::borrow_mut(&mut registry.vaults, circle_id);
+        assert!(table::contains(&registry.circles, circles_id), E_CIRCLE_NOT_FOUND);
+        let circle = table::borrow_mut(&mut registry.circles, circles_id);
+        let vault = table::borrow_mut(&mut registry.vaults, circles_id);
         
         // Check cycle ended
         let current_time = timestamp::now_seconds();
@@ -208,9 +202,9 @@ module circle_save_contracts::main {
         coin::transfer<AptosCoin>(&resource_signer, user_addr, amount);
 
         event::emit(WithdrawalRequested {
-            circle_id,
+            circle_id: circles_id,
             user: user_addr,
-            amount,
+            amount: *user_balance,
             withdrawal_type: 1,  // USDC
         });
     }
@@ -218,7 +212,7 @@ module circle_save_contracts::main {
     // This is called AFTER your backend successfully transfers via Monnify
     public entry fun confirm_fiat_withdrawal(
         admin: &signer,
-        circle_id: u64,
+        circles_id: u64,
         user_address: address,
         amount: u64,
     ) acquires ModuleData, Registry {
@@ -229,9 +223,9 @@ module circle_save_contracts::main {
         let resource_addr = get_resource_account_address();
         let registry = borrow_global_mut<Registry>(resource_addr);
         
-        assert!(table::contains(&registry.circles, circle_id), E_CIRCLE_NOT_FOUND);
-        let circle = table::borrow_mut(&mut registry.circles, circle_id);
-        let vault = table::borrow_mut(&mut registry.vaults, circle_id);
+        assert!(table::contains(&registry.circles, circles_id), E_CIRCLE_NOT_FOUND);
+        let circle = table::borrow_mut(&mut registry.circles, circles_id);
+        let vault = table::borrow_mut(&mut registry.vaults, circles_id);
         
         // Check cycle ended
         let current_time = timestamp::now_seconds();
@@ -247,21 +241,21 @@ module circle_save_contracts::main {
         vault.total_balance = vault.total_balance - amount;
 
         event::emit(WithdrawalRequested {
-            circle_id,
+            circle_id: circles_id,
             user: user_address,
-            amount,
+            amount: *user_balance,
             withdrawal_type: 2,  // Fiat
         });
     }
 
     #[view]
-    public fun get_user_balance(circle_id: u64, user: address): u64 acquires Registry {
+    public fun get_user_balance(circle_id: u64, user_address: address): u64 acquires Registry {
         let resource_addr = get_resource_account_address();
         let registry = borrow_global<Registry>(resource_addr);
         let vault = table::borrow(&registry.vaults, circle_id);
         
-        if (table::contains(&vault.contributors_balance, user)) {
-            *table::borrow(&vault.contributors_balance, user)
+        if (table::contains(&vault.contributors_balance, user_address)) {
+            *table::borrow(&vault.contributors_balance, user_address)
         } else {
             0
         }
@@ -272,7 +266,8 @@ module circle_save_contracts::main {
         let resource_addr = get_resource_account_address();
         let registry = borrow_global<Registry>(resource_addr);
         let circle = table::borrow(&registry.circles, circle_id);
-        
-        (circle.name, circle.creator, circle.start_cycle, circle.end_cycle, circle.total_amount, circle.status)
+        let vault = table::borrow(&registry.vaults, circle_id);
+
+        (circle.name, circle.creator, circle.start_cycle, circle.end_cycle, vault.total_balance, circle.status)
     }
 }
