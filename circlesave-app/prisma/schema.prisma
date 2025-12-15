@@ -1,0 +1,92 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"  // ✅ Changed from postgresql
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  username      String    @unique
+  password      String?
+  name          String?
+  googleId      String?   @unique
+  walletAddress String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  createdCircles      Circle[]            @relation("CircleCreator")
+  circleContributions CircleContributor[]
+  withdrawals         Withdrawal[]
+}
+
+model Circle {
+  id            Int      @id @default(autoincrement())
+  onChainId     Int?     @unique  // ✅ Changed from BigInt to Int for SQLite
+  name          String
+  creatorId     Int
+  startCycle    Int      // ✅ Changed from BigInt to Int
+  endCycle      Int      // ✅ Changed from BigInt to Int
+  status        Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  creator       User              @relation("CircleCreator", fields: [creatorId], references: [id])
+  vault         Vault?
+  contributors  CircleContributor[]
+  withdrawals   Withdrawal[]
+}
+
+model Vault {
+  id            Int      @id @default(autoincrement())
+  circleId      Int      @unique
+  createdAt     Int      // ✅ Changed from BigInt to Int
+  totalBalance  Int      @default(0)  // ✅ Changed from BigInt to Int
+  updatedAt     DateTime @updatedAt
+  
+  circle        Circle   @relation(fields: [circleId], references: [id], onDelete: Cascade)
+}
+
+model CircleContributor {
+  id                  Int      @id @default(autoincrement())
+  circleId            Int
+  userId              Int
+  walletAddress       String
+  balance             Int      @default(0)  // ✅ Changed from BigInt to Int
+  lastContributionAt  DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  circle        Circle   @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([circleId, walletAddress])
+  @@index([circleId])
+  @@index([userId])
+  @@index([walletAddress])
+}
+
+model Withdrawal {
+  id              Int       @id @default(autoincrement())
+  circleId        Int
+  userId          Int
+  walletAddress   String
+  amount          Int       // ✅ Changed from BigInt to Int
+  status          String    @default("pending")
+  transactionHash String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime?
+  
+  circle        Circle   @relation(fields: [circleId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([circleId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}

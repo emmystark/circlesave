@@ -2,6 +2,8 @@ import 'dotenv/config'
 import express from 'express'
 import path, { dirname } from 'path'
 import { fileURLToPath } from 'url'
+import authRoutes from './routes/authRoutes'
+import circleRoutes from './routes/circleRoutes'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -9,17 +11,36 @@ const __dirname = dirname(__filename)
 const app = express()
 const PORT = process.env.PORT ?? 3000
 
-// Serve static files from /public directory
-app.use(express.static(path.join(__dirname, '..', 'public')))
+// Parse JSON bodies
+app.use(express.json())
 
+// API routes - must come before static file serving
 app.get('/health', (_req, res) => res.json({ ok: true }))
+app.use('/auth', authRoutes)
+app.use('/circles', circleRoutes)
 
-// Fallback to index.html for SPA routes (catch-all for client-side routing)
-app.get('/', (_req, res) => {
-	res.sendFile(path.join(__dirname, '..', 'public', 'index.html'))
+// Serve static files from /public directory (includes index.html for root path)
+const publicPath = path.join(__dirname, '..', 'public')
+app.use(express.static(publicPath, { index: 'index.html' }))
+
+// ✅ FIXED: Use middleware instead of app.get() for catch-all
+app.use((req, res) => {
+	// Skip if it's an API route or asset request
+	if (
+		req.path.startsWith('/assets/') ||
+		req.path.startsWith('/auth/') ||
+		req.path.startsWith('/circles/') ||
+		req.path.startsWith('/health')
+	) {
+		return res.status(404).send('Not found')
+	}
+	res.sendFile(path.join(publicPath, 'index.html'))
 })
 
 app.listen(PORT, () => {
 	// eslint-disable-next-line no-console
 	console.log(`Backend server listening on http://localhost:${PORT}`)
+}).on('error', (err) => {
+	// eslint-disable-next-line no-console
+	console.error('Server error:', err)
 })

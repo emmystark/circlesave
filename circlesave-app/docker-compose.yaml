@@ -1,0 +1,46 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    container_name: circlesave_app
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/circlesave
+      - JWT_SECRET=${JWT_SECRET:-your_jwt_secret_key_change_in_production}
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=${PORT:-3000}
+      - MODULE_ADDRESS=${MODULE_ADDRESS:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:3000/auth/oauth2callback}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npx prisma generate && sleep 5 && npx prisma migrate deploy && npm run start"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: circlesave_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: circlesave
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
