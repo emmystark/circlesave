@@ -25,18 +25,39 @@ export interface CircleInfo {
 export const createCircle = async (
   signAndSubmitTransaction: any,
   circleName: string,
-  endCycleDays: number
-): Promise<string> => {
+  endCycleDays: number,
+  sender: string
+): Promise<{ hash: string; circleId?: number }> => {
   try {
     const response = await signAndSubmitTransaction({
+      sender,
       data: {
         function: `${MODULE_ADDRESS}::main::create_circle`,
+        typeArguments: [],
         functionArguments: [circleName, endCycleDays],
       },
     });
 
     await aptos.waitForTransaction({ transactionHash: response.hash });
-    return response.hash;
+
+    let circleId: number | undefined;
+    try {
+      const tx = await aptos.getTransactionByHash({ transactionHash: response.hash });
+      const events = (tx as any)?.events || [];
+      const created = events.find(
+        (e: any) =>
+          typeof e?.type === 'string' &&
+          e.type.toLowerCase().includes('::circlecreated')
+      );
+      const rawId = created?.data?.circle_id ?? created?.data?.circleId;
+      if (rawId !== undefined) {
+        circleId = Number(rawId);
+      }
+    } catch {
+      // best-effort; leave circleId undefined
+    }
+
+    return { hash: response.hash, circleId };
   } catch (error) {
     console.error('Create circle failed:', error);
     throw error;

@@ -1,540 +1,699 @@
-import { useState } from 'react';
-import { User, Bell, Settings, Search, ChevronRight, ChevronLeft } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Home,
+  LogIn,
+  LogOut,
+  RefreshCcw,
+  Search,
+  Settings,
+  ShieldCheck,
+  UserPlus,
+  Wallet,
+  Users,
+} from 'lucide-react'
+import logo from './assets/logo.png'
+import { createCircle as createCircleOnChain } from './utils/circleFunctions'
 
-const CircleSaveApp = () => {
-  const [currentPage, setCurrentPage] = useState('home');
+type Circle = {
+  id: number
+  name: string
+  onChainId?: string | null
+  startCycle: string
+  endCycle: string
+  totalBalance: string
+  contributorCount: number
+  creator: {
+    id: number
+    username: string
+    name: string | null
+  }
+  status: number
+}
 
-  // Navigation Component
-  const Navigation = () => (
-    <nav className="bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto flex items-center justify-between h-16">
-        <div className="flex items-center space-x-2">
-          {/* <div className="w-8 h-8 bg-teal-600 rounded-full flex items-center justify-center">
-            <div className="w-6 h-6 bg-white rounded-full opacity-50"></div>
-          </div> */}
-          <span className="text-xl font-semibold text-gray-900">
-            <img className='w-28' src="logo.png" alt="" />
-          </span>
-        </div>
-        
-        <div className="hidden md:flex items-center space-x-8">
-          <button 
-            onClick={() => setCurrentPage('home')}
-            className={`text-sm font-medium ${currentPage === 'home' ? 'text-gray-900 border-b-2 border-teal-600 pb-5' : 'text-gray-600'}`}
-          >
-            Home
-          </button>
-          <button 
-            onClick={() => setCurrentPage('circles')}
-            className={`text-sm font-medium ${currentPage === 'circles' || currentPage === 'wallet' ? 'text-gray-900 border-b-2 border-teal-600 pb-5' : 'text-gray-600'}`}
-          >
-            My Circles
-          </button>
-          <button className="text-sm font-medium text-gray-600">
-            Account
-          </button>
-        </div>
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+const TOKEN_KEY = 'circlesave-token'
+const WALLET_KEY = 'circlesave-wallet'
+const MODULE_ADDRESS = import.meta.env.VITE_MODULE_ADDRESS;
 
-        <div className="flex items-center space-x-4">
-          <button className="text-gray-600">
-            <Bell size={20} />
-          </button>
-          <button className="text-gray-600">
-            <User size={20} />
-          </button>
-        </div>
-      </div>
-    </nav>
-  );
+function App() {
+  console.log('MODULE_ADDRESS:', MODULE_ADDRESS);
+  const [token, setToken] = useState<string | null>(null)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authLoading, setAuthLoading] = useState(false)
 
-  // Home Page
-  const HomePage = () => (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Panel - Greeting and Contribution */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex items-center space-x-4 mb-6">
-              <img className='w-28' src="logo.png" alt="" />
-              <div>
-                <h2 className="text-2xl font-semibold text-gray-900">Good Morning,</h2>
-                <p className="text-2xl text-gray-900">Sarah 👋</p>
-              </div>
+  const [circles, setCircles] = useState<Circle[]>([])
+  const [circlesLoading, setCirclesLoading] = useState(false)
+  const [circlesError, setCirclesError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState<'home' | 'circles' | 'settings'>('home')
+  const [walletStatus, setWalletStatus] = useState<string | null>(null)
+  const [walletLoading, setWalletLoading] = useState(false)
+  const [connectedAddress, setConnectedAddress] = useState<string | null>(null)
+  const [circleName, setCircleName] = useState('')
+  const [circleDuration, setCircleDuration] = useState<number>(30)
+  const [createStatus, setCreateStatus] = useState<string | null>(null)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [userProfileLoaded, setUserProfileLoaded] = useState(false)
+
+  // Grab token from query string (Google callback) or localStorage
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const tokenFromUrl = url.searchParams.get('token')
+    const stored = localStorage.getItem(TOKEN_KEY)
+    const storedWallet = localStorage.getItem(WALLET_KEY)
+
+    if (tokenFromUrl) {
+      setToken(tokenFromUrl)
+      localStorage.setItem(TOKEN_KEY, tokenFromUrl)
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url.toString())
+    } else if (stored) {
+      setToken(stored)
+    }
+    if (storedWallet) {
+      setConnectedAddress(storedWallet)
+    }
+  }, [])
+
+  // Load profile (wallet) from backend when token available
+  useEffect(() => {
+    async function loadProfile() {
+      if (!token) return
+      try {
+        const res = await fetch(`${API_URL}/auth/profile`, {
+          headers: { Authorization: token },
+        })
+        if (res.ok) {
+          const body = await res.json().catch(() => ({}))
+          if (body?.user?.walletAddress) {
+            setConnectedAddress(body.user.walletAddress)
+          localStorage.setItem(WALLET_KEY, body.user.walletAddress)
+          }
+        } else if (res.status === 401) {
+          localStorage.removeItem(TOKEN_KEY)
+          setToken(null)
+        }
+      } catch {
+        // ignore profile load errors
+      } finally {
+        setUserProfileLoaded(true)
+      }
+    }
+    loadProfile()
+  }, [token])
+
+  // Fetch circles when token changes
+  useEffect(() => {
+    if (!token) return
+    void loadCircles()
+  }, [token])
+
+  const filteredCircles = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return circles
+    return circles.filter((circle) => circle.name.toLowerCase().includes(term))
+  }, [circles, search])
+
+  async function handleAuth() {
+    setAuthError(null)
+    setAuthLoading(true)
+    try {
+      const endpoint = authMode === 'login' ? 'login' : 'register'
+      const res = await fetch(`${API_URL}/auth/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message || 'Unable to authenticate')
+      }
+
+      const body = await res.json()
+      if (!body.token) throw new Error('No token returned')
+
+      localStorage.setItem(TOKEN_KEY, body.token)
+      setToken(body.token)
+      setUsername('')
+      setPassword('')
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication failed')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function startGoogleAuth() {
+    setAuthError(null)
+    try {
+      const res = await fetch(`${API_URL}/auth/getAuthUrl`)
+      if (!res.ok) throw new Error('Unable to start Google sign-in')
+      const { url } = await res.json()
+      if (!url) throw new Error('No Google URL returned')
+      window.location.href = url
+    } catch (err: any) {
+      setAuthError(err.message || 'Google sign-in failed')
+    }
+  }
+
+  async function loadCircles() {
+    if (!token) return
+    setCirclesLoading(true)
+    setCirclesError(null)
+    try {
+      const res = await fetch(`${API_URL}/circles`, {
+        headers: { Authorization: token },
+      })
+
+      if (res.status === 401) {
+        // Token expired/invalid
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+        throw new Error('Session expired. Please sign in again.')
+      }
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message || 'Failed to load circles')
+      }
+
+      const body = await res.json()
+      setCircles(body.circles || [])
+    } catch (err: any) {
+      setCirclesError(err.message || 'Could not fetch circles')
+    } finally {
+      setCirclesLoading(false)
+    }
+  }
+
+  async function connectWallet() {
+    if (!token) return
+    setWalletStatus(null)
+    setWalletLoading(true)
+    try {
+      const nightly = (window as any)?.nightly?.aptos || (window as any)?.nightly
+      const aptos = (window as any)?.aptos
+      const wallet = nightly?.connect ? nightly : aptos
+
+      if (!wallet?.connect) {
+        throw new Error('Aptos wallet not found. Please install Nightly/Petra/Martian.')
+      }
+
+      const account = await wallet.connect()
+      const address = account?.address || account?.publicKey || account?.accountAddress
+      if (!address) {
+        throw new Error('Wallet did not return an address')
+      }
+
+      localStorage.setItem(WALLET_KEY, address)
+      const res = await fetch(`${API_URL}/auth/wallet`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token,
+        },
+        body: JSON.stringify({ walletAddress: address }),
+      })
+      if (res.status === 401) {
+        localStorage.removeItem(TOKEN_KEY)
+        setToken(null)
+        throw new Error('Session expired. Please sign in again.')
+      }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(body.message || 'Failed to connect wallet')
+      }
+      setWalletStatus('Wallet connected successfully.')
+      setConnectedAddress(address)
+      setCreateStatus(null)
+    } catch (err: any) {
+      setWalletStatus(err.message || 'Failed to connect wallet')
+    } finally {
+      setWalletLoading(false)
+    }
+  }
+
+  function getWalletProvider() {
+    const nightly = (window as any)?.nightly?.aptos || (window as any)?.nightly
+    const aptos = (window as any)?.aptos
+    return nightly || aptos || null
+  }
+
+  async function createCircleFlow() {
+    console.log('createCircleFlow called');
+    if (!token) {
+      console.log('No token');
+      setCreateStatus('Please sign in first.')
+      return
+    }
+    if (!connectedAddress) {
+      console.log('No connectedAddress');
+      setCreateStatus('Connect your wallet first.')
+      return
+    }
+    if (!MODULE_ADDRESS) {
+      console.log('No MODULE_ADDRESS');
+      setCreateStatus('Module address is not configured.')
+      return
+    }
+    if (!circleName.trim()) {
+      console.log('No circleName');
+      setCreateStatus('Circle name is required.')
+      return
+    }
+    if (!circleDuration || circleDuration <= 0) {
+      console.log('Invalid circleDuration', circleDuration);
+      setCreateStatus('Duration (days) must be greater than 0.')
+      return
+    }
+
+    setCreateStatus(null)
+    setCreateLoading(true)
+    try {
+      const wallet = getWalletProvider()
+      if (!wallet?.signAndSubmitTransaction) {
+        throw new Error('Connect a compatible Aptos wallet before creating a circle.')
+      }
+
+      const { hash, circleId } = await createCircleOnChain(
+        wallet.signAndSubmitTransaction,
+        circleName.trim(),
+        circleDuration,
+        connectedAddress
+      )
+
+      if (circleId === undefined) {
+        throw new Error('Could not read circle id from transaction. Please retry.')
+      }
+
+      const res = await fetch(`${API_URL}/circles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token,
+        },
+        body: JSON.stringify({
+          onChainId: circleId,
+          name: circleName.trim(),
+          durationDays: circleDuration,
+          transactionHash: hash,
+        }),
+      })
+
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(body.message || 'Failed to save circle in backend')
+      }
+
+      setCreateStatus('Circle created successfully.')
+      setCircleName('')
+      setCircleDuration(30)
+      await loadCircles()
+    } catch (err: any) {
+      setCreateStatus(err.message || 'Failed to create circle')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  async function disconnectWallet() {
+    setWalletStatus(null)
+    setConnectedAddress(null)
+    localStorage.removeItem(WALLET_KEY)
+    try {
+      await fetch(`${API_URL}/auth/wallet`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token || '',
+        },
+        body: JSON.stringify({ walletAddress: null }),
+      })
+    } catch {
+      // ignore backend disconnect errors
+    }
+    try {
+      const nightly = (window as any)?.nightly?.aptos || (window as any)?.nightly
+      const aptos = (window as any)?.aptos
+      const wallet = nightly?.disconnect ? nightly : aptos?.disconnect ? aptos : null
+      if (wallet?.disconnect) {
+        await wallet.disconnect()
+      }
+    } catch (err) {
+      // best-effort; ignore disconnect failures
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY)
+    setToken(null)
+    setCircles([])
+  }
+
+  if (!token) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="max-w-xl w-full bg-white shadow-xl rounded-2xl p-8 space-y-6">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-teal-600 rounded-full flex items-center justify-center text-white">
+              <ShieldCheck size={20} />
             </div>
-
-            <div className="bg-gradient-to-br from-slate-700 to-slate-900 rounded-lg p-6 text-white">
-              <p className="text-sm text-gray-300 mb-2">Your contribution</p>
-              <h3 className="text-3xl font-bold mb-1">$1,367.00</h3>
-              <p className="text-xs text-gray-400 mb-4">Dec/Jan 11, 2023</p>
-              <div className="mb-2">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-400">Progress</span>
-                  <span>46%</span>
-                </div>
-                <div className="w-full bg-slate-600 rounded-full h-2">
-                  <div className="bg-teal-500 h-2 rounded-full" style={{ width: '46%' }}></div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 relative">
-              <button className="absolute top-2 right-2 text-gray-400">×</button>
-              <p className="text-sm text-gray-700 mb-3">
-                For wisla contributes are either food type, for inxxxxxxss and get USDC via the application.
-              </p>
-              <button className="w-full bg-teal-600 text-white py-2 rounded-lg font-medium hover:bg-teal-700">
-                Contribution
-              </button>
+            <div>
+              <p className="text-sm text-gray-500 uppercase tracking-wide">CircleSave</p>
+              <h1 className="text-2xl font-semibold text-gray-900">Sign in to continue</h1>
             </div>
           </div>
 
-          {/* Contribution Flow List */}
-          <div className="bg-white rounded-lg shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Contribution Flow</h3>
-            <div className="space-y-3">
-              {[1, 2, 3].map((item) => (
-                <div key={item} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                      <div className="w-6 h-6 bg-gray-300 rounded"></div>
-                    </div>
+          <div className="flex space-x-2 bg-gray-100 rounded-lg p-1">
+            <button
+              className={`flex-1 py-2 rounded-md text-sm font-medium ${authMode === 'login' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+              onClick={() => setAuthMode('login')}
+            >
+              Login
+            </button>
+            <button
+              className={`flex-1 py-2 rounded-md text-sm font-medium ${authMode === 'register' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+              onClick={() => setAuthMode('register')}
+            >
+              Register
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Email / Username</label>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                placeholder="you@example.com"
+                autoComplete="username"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                placeholder="••••••••"
+                autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+              />
+            </div>
+          </div>
+
+          {authError && <p className="text-sm text-red-600">{authError}</p>}
+
+          <div className="space-y-3">
+            <button
+              onClick={handleAuth}
+              disabled={authLoading}
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center space-x-2 disabled:opacity-70"
+            >
+              {authLoading ? (
+                <>
+                  <RefreshCcw className="animate-spin" size={18} />
+                  <span>{authMode === 'login' ? 'Signing in...' : 'Creating account...'}</span>
+                </>
+              ) : (
+                <>
+                  {authMode === 'login' ? <LogIn size={18} /> : <UserPlus size={18} />}
+                  <span>{authMode === 'login' ? 'Sign In' : 'Create Account'}</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={startGoogleAuth}
+              className="w-full border border-gray-300 hover:border-teal-500 text-gray-800 font-medium py-3 rounded-lg flex items-center justify-center space-x-2"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+              <span>Continue with Google</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <img src={logo} alt="CircleSave" className="w-10 h-10 rounded-full object-contain bg-white" />
+          <div>
+            <p className="text-sm text-gray-500">CircleSave</p>
+            <h1 className="text-lg font-semibold text-gray-900">Dashboard</h1>
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={loadCircles}
+            className="px-3 py-2 text-sm font-medium text-gray-700 border rounded-lg hover:bg-gray-50 flex items-center space-x-2"
+          >
+            <RefreshCcw size={16} /> <span>Refresh</span>
+          </button>
+          <button
+            onClick={logout}
+            className="px-3 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 flex items-center space-x-2"
+          >
+            <LogOut size={16} /> <span>Log out</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Top tabs */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 flex space-x-4">
+          <TabButton icon={<Home size={16} />} label="Home" active={activeTab === 'home'} onClick={() => setActiveTab('home')} />
+          <TabButton
+            icon={<Users size={16} />}
+            label="My Circles"
+            active={activeTab === 'circles'}
+            onClick={() => setActiveTab('circles')}
+          />
+          <TabButton
+            icon={<Settings size={16} />}
+            label="Settings"
+            active={activeTab === 'settings'}
+            onClick={() => setActiveTab('settings')}
+          />
+        </div>
+      </div>
+
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 py-8 space-y-6">
+        {activeTab === 'home' && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StatCard title="Total circles" value={circles.length} />
+            <StatCard title="Active circles" value={circles.filter((c) => c.status === 0).length} />
+            <StatCard
+              title="Closed circles"
+              value={circles.filter((c) => c.status !== 0).length}
+              subtitle="History from backend"
+            />
+            <div className="md:col-span-3 bg-white shadow-sm rounded-xl p-5">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Welcome back</h3>
+              <p className="text-sm text-gray-600">
+                Your data now comes directly from the backend. Use the My Circles tab to explore, or connect your wallet from Settings.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'circles' && (
+          <div className="bg-white shadow-sm rounded-xl p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">My circles</h2>
+                <p className="text-sm text-gray-600">Showing data directly from your backend</p>
+              </div>
+              <div className="relative w-full sm:w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search circles by name"
+                  className="w-full pl-10 pr-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+            </div>
+
+            <div className="bg-teal-50 border border-teal-100 rounded-xl p-4 mb-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-teal-800">Create a new circle</p>
+                  <p className="text-xs text-teal-700">Deploys on-chain then syncs to backend.</p>
+                </div>
+                <span className="text-xs bg-white px-2 py-1 rounded-full border border-teal-100 text-teal-700">
+                  Movement / Aptos
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input
+                  value={circleName}
+                  onChange={(e) => setCircleName(e.target.value)}
+                  placeholder="Circle name"
+                  className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={circleDuration}
+                  onChange={(e) => setCircleDuration(Number(e.target.value))}
+                  placeholder="Duration (days)"
+                  className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <button
+                  onClick={createCircleFlow}
+                  disabled={createLoading}
+                  className="w-full bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-70 flex items-center justify-center space-x-2 px-4"
+                >
+                  {(() => { console.log('Create circle button rendered'); return null })()}
+                  {createLoading ? <RefreshCcw className="animate-spin" size={16} /> : <Users size={16} />}
+                  <span>{createLoading ? 'Creating...' : 'Create circle'}</span>
+                </button>
+              </div>
+              {createStatus && (
+                <p
+                  className={`text-sm ${
+                    createStatus.toLowerCase().includes('success') ? 'text-green-700' : 'text-red-600'
+                  }`}
+                >
+                  {createStatus}
+                </p>
+              )}
+            </div>
+
+            {circlesLoading && (
+              <div className="text-sm text-gray-600 flex items-center space-x-2">
+                <RefreshCcw className="animate-spin" size={16} />
+                <span>Loading circles...</span>
+              </div>
+            )}
+
+            {circlesError && <p className="text-sm text-red-600">{circlesError}</p>}
+
+            {!circlesLoading && filteredCircles.length === 0 && !circlesError && (
+              <p className="text-sm text-gray-600">No circles found. Create or join one from another device, then refresh.</p>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredCircles.map((circle) => (
+                <div key={circle.id} className="border rounded-xl p-4 hover:shadow-sm transition">
+                  <div className="flex items-center justify-between mb-3">
                     <div>
-                      <p className="font-medium text-gray-900">Contribution</p>
-                      <p className="text-sm text-gray-500">12 Circles</p>
+                      <p className="text-xs uppercase text-gray-500">Circle</p>
+                      <h3 className="text-lg font-semibold text-gray-900">{circle.name}</h3>
+                      {circle.onChainId && <p className="text-xs text-gray-500">On-chain ID: {circle.onChainId}</p>}
                     </div>
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        circle.status === 0 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {circle.status === 0 ? 'Active' : 'Closed'}
+                    </span>
                   </div>
-                  <ChevronRight size={20} className="text-gray-400" />
+
+                  <div className="text-sm text-gray-700 space-y-1">
+                    <p>Creator: {circle.creator.name || circle.creator.username}</p>
+                    <p>Total balance: {circle.totalBalance}</p>
+                    <p>Contributors: {circle.contributorCount}</p>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Right Panel - My Circles */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-semibold text-gray-900">My Circles</h3>
-            <Settings size={20} className="text-gray-600 cursor-pointer" />
-          </div>
-
-          <div className="relative mb-6">
-            <Search size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search to name your my circles"
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          <div className="mb-6">
-            <h4 className="text-sm font-semibold text-gray-700 mb-3">Contribution Flow</h4>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                    <div className="w-6 h-6 bg-gray-300 rounded"></div>
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Contribution</p>
-                    <p className="text-sm text-gray-500">12 Circles</p>
-                  </div>
-                </div>
-                <ChevronRight size={20} className="text-gray-400" />
+        {activeTab === 'settings' && (
+          <div className="bg-white shadow-sm rounded-xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center">
+                <Settings size={18} />
               </div>
-
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                    1
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Contribute</p>
-                    <p className="text-sm text-gray-500">$1,300.00</p>
-                  </div>
-                </div>
-                <ChevronRight size={20} className="text-gray-400" />
-              </div>
-
-              <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                    S
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Sarah</p>
-                    <p className="text-sm text-gray-500">Dec circles</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-gray-900">$1,367.00</span>
-                  <ChevronRight size={20} className="text-gray-400" />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                    W
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Westert</p>
-                    <p className="text-sm text-gray-500">$1,300.00</p>
-                  </div>
-                </div>
-                <ChevronRight size={20} className="text-gray-400" />
-              </div>
-
-              <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                    DC
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Circles 1</p>
-                    <p className="text-sm text-gray-500">17 Circles</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-teal-600">+$2.00</span>
-                  <ChevronRight size={20} className="text-gray-400" />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                    DC
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Circles 2</p>
-                    <p className="text-sm text-gray-500">17 Circles</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm font-medium text-gray-600">-$3.3</span>
-                  <ChevronRight size={20} className="text-gray-400" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Active Circles Page
-  const ActiveCirclesPage = () => (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold text-gray-900">Active Circles</h2>
-          <Settings size={20} className="text-gray-600 cursor-pointer" />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          {/* Office Rent Card */}
-          <div className="border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center text-white">
-                  <div className="w-6 h-6 bg-white rounded opacity-50"></div>
-                </div>
-                <h3 className="font-semibold text-gray-900">Office Rent</h3>
-              </div>
-              <div className="w-6 h-6 bg-teal-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">✓</span>
-              </div>
-            </div>
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-1">Pot amount</p>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xl font-bold text-gray-900">₦50k/week</p>
-                <p className="text-sm font-medium text-gray-600">89%</p>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-teal-600 h-2 rounded-full" style={{ width: '89%' }}></div>
-              </div>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">Next Payout: 10 time</p>
-            <button className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-50">
-              View Dashboard
-            </button>
-          </div>
-
-          {/* Ball Trip Card */}
-          <div className="border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center">
-                  <div className="w-6 h-6 bg-gray-400 rounded"></div>
-                </div>
-                <h3 className="font-semibold text-gray-900">Ball Trip</h3>
-              </div>
-              <div className="w-6 h-6 bg-teal-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">✓</span>
-              </div>
-            </div>
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-1">Pot amount</p>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xl font-bold text-gray-900">₦50k/week</p>
-                <p className="text-sm font-medium text-gray-600">92%</p>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: '92%' }}></div>
-              </div>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">Next Payout: 10 time</p>
-            <button className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-50">
-              View Dashboard
-            </button>
-          </div>
-
-          {/* Office Rent Card 2 */}
-          <div className="border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center text-white">
-                  <div className="w-6 h-6 bg-white rounded opacity-50"></div>
-                </div>
-                <h3 className="font-semibold text-gray-900">Office Rent</h3>
-              </div>
-              <div className="w-6 h-6 bg-teal-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">✓</span>
-              </div>
-            </div>
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-1">Pot amount</p>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xl font-bold text-gray-900">₦50k/week</p>
-                <p className="text-sm font-medium text-gray-600">87%</p>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-teal-600 h-2 rounded-full" style={{ width: '87%' }}></div>
-              </div>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">Next Payout: 10 Nov</p>
-            <button className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-50">
-              View Dashboard
-            </button>
-          </div>
-
-          {/* Circler Supply Card */}
-          <div className="border border-gray-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center">
-                  <div className="w-6 h-6 bg-gray-400 rounded"></div>
-                </div>
-                <h3 className="font-semibold text-gray-900">Circler Supply</h3>
-              </div>
-              <div className="w-6 h-6 bg-teal-600 rounded-full flex items-center justify-center">
-                <span className="text-white text-xs">✓</span>
-              </div>
-            </div>
-            <div className="mb-4">
-              <p className="text-sm text-gray-600 mb-1">Pot amount</p>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xl font-bold text-gray-900">₦50k/week</p>
-                <p className="text-sm font-medium text-gray-600">75%</p>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-blue-600 h-2 rounded-full" style={{ width: '75%' }}></div>
-              </div>
-            </div>
-            <p className="text-sm text-gray-600 mb-4">Next Payout: 10 Nov</p>
-            <button className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg font-medium hover:bg-gray-50">
-              View Dashboard
-            </button>
-          </div>
-        </div>
-
-        {/* Past Circles */}
-        <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Past Circles</h3>
-          <div className="space-y-2">
-            <details className="border border-gray-200 rounded-lg">
-              <summary className="p-4 cursor-pointer flex items-center justify-between hover:bg-gray-50">
-                <span className="font-medium text-gray-900">Office Rent - History</span>
-                <ChevronRight size={20} className="text-gray-400" />
-              </summary>
-              <div className="p-4 border-t border-gray-200 bg-gray-50">
-                <p className="text-sm text-gray-600">Past circle details would appear here...</p>
-              </div>
-            </details>
-            <details className="border border-gray-200 rounded-lg">
-              <summary className="p-4 cursor-pointer flex items-center justify-between hover:bg-gray-50">
-                <span className="font-medium text-gray-900">Ball Trip - wH History</span>
-                <ChevronRight size={20} className="text-gray-400" />
-              </summary>
-              <div className="p-4 border-t border-gray-200 bg-gray-50">
-                <p className="text-sm text-gray-600">Past circle details would appear here...</p>
-              </div>
-            </details>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Wallet Page
-  const WalletPage = () => (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Panel - My Circles */}
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <div className="flex items-center space-x-4 mb-6">
-            <button
-              onClick={() => setCurrentPage('circles')}
-              className="text-lg font-semibold text-gray-900 border-b-2 border-teal-600 pb-2"
-            >
-              My Circles
-            </button>
-            <button className="text-lg font-medium text-gray-600">
-              Wallet
-            </button>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex items-center space-x-2 mb-4">
-              <Search size={18} className="text-gray-400" />
-              <span className="text-sm text-gray-600">All</span>
-            </div>
-            <div className="flex items-center space-x-2 mb-4">
-              <div className="flex items-center space-x-2">
-                <div className="w-6 h-6 bg-gray-100 rounded flex items-center justify-center">
-                  <div className="w-4 h-4 bg-gray-300"></div>
-                </div>
-                <span className="text-sm text-gray-700">Filters</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-              <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                S
-              </div>
-              <span className="text-gray-900 font-medium">Sarah</span>
-            </div>
-            <div className="flex items-center space-x-3 p-3 hover:bg-gray-50 rounded-lg cursor-pointer">
-              <div className="w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-white font-semibold">
-                W
-              </div>
-              <span className="text-gray-900 font-medium">Westert</span>
-            </div>
-          </div>
-
-          <button className="mt-6 text-teal-600 text-sm font-medium">
-            Add my circles
-          </button>
-        </div>
-
-        {/* Right Panel - Circle Details */}
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-br from-slate-700 to-slate-900 text-white p-6 relative">
-            <button 
-              onClick={() => setCurrentPage('circles')}
-              className="absolute top-6 right-6 text-white hover:text-gray-200"
-            >
-              <ChevronLeft size={24} />
-            </button>
-            <div className="flex items-center justify-center mb-2">
-              <div className="w-12 h-12 bg-teal-600 rounded-full flex items-center justify-center">
-                <div className="w-8 h-8 bg-white rounded-full opacity-30"></div>
-              </div>
-            </div>
-            <h2 className="text-2xl font-bold text-center mb-1">Circler Supply</h2>
-            <p className="text-sm text-gray-300 text-center">Last onen 11, 2023</p>
-          </div>
-
-          <div className="p-6">
-            <div className="grid grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
               <div>
-                <p className="text-sm text-gray-600 mb-1">Your salary</p>
-                <p className="text-2xl font-bold text-gray-900">$293.00</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm text-gray-600 mb-1">Contribution</p>
-                <p className="text-2xl font-bold text-gray-900">$0</p>
+                <h2 className="text-xl font-semibold text-gray-900">Settings</h2>
+                <p className="text-sm text-gray-600">Connect your wallet to sync deposits/withdrawals.</p>
               </div>
             </div>
 
-            <div className="mb-6">
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-gray-600">Bil $250.00</span>
-                <span className="text-gray-900">+$200.01</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-teal-600 h-2 rounded-full" style={{ width: '80%' }}></div>
-              </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Wallet</label>
+              <p className="text-sm text-gray-600">Connect your Aptos-compatible wallet (Movement Move).</p>
+              {connectedAddress ? (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="text-sm text-gray-700">
+                    <span className="font-medium text-gray-900">Connected:</span> {connectedAddress}
+                  </div>
+                  <button
+                    onClick={disconnectWallet}
+                    className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg font-medium hover:bg-gray-200 flex items-center space-x-2"
+                  >
+                    <Wallet size={16} />
+                    <span>Disconnect wallet</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={connectWallet}
+                  disabled={walletLoading}
+                  className="px-4 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-70 flex items-center space-x-2"
+                >
+                  {walletLoading ? <RefreshCcw className="animate-spin" size={16} /> : <Wallet size={16} />}
+                  <span>{walletLoading ? 'Connecting...' : 'Connect wallet'}</span>
+                </button>
+              )}
+              {walletStatus && (
+                <p className={`text-sm ${walletStatus.includes('successfully') ? 'text-green-700' : 'text-red-600'}`}>
+                  {walletStatus}
+                </p>
+              )}
             </div>
-
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Contributions</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-2 text-sm font-medium text-gray-700">Date</th>
-                      <th className="text-left py-3 px-2 text-sm font-medium text-gray-700">Name</th>
-                      <th className="text-right py-3 px-2 text-sm font-medium text-gray-700">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jan 17, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Sarah</td>
-                      <td className="py-3 px-2 text-sm text-green-600 text-right">+$10.00</td>
-                    </tr>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jan 17, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Lohnrium</td>
-                      <td className="py-3 px-2 text-sm text-red-600 text-right">-$0.00</td>
-                    </tr>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jan 17, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Sarah</td>
-                      <td className="py-3 px-2 text-sm text-green-600 text-right">+$0.00</td>
-                    </tr>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jan 17, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Sarah</td>
-                      <td className="py-3 px-2 text-sm text-green-600 text-right">+$0.00</td>
-                    </tr>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jul 08, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Sarah</td>
-                      <td className="py-3 px-2 text-sm text-red-600 text-right">-$0.00</td>
-                    </tr>
-                    <tr className="border-b border-gray-100">
-                      <td className="py-3 px-2 text-sm text-gray-600">Jul 08, 2023</td>
-                      <td className="py-3 px-2 text-sm text-gray-900">Sarah</td>
-                      <td className="py-3 px-2 text-sm text-red-600 text-right">-$0.00</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <button className="w-full mt-6 bg-teal-600 text-white py-3 rounded-lg font-medium hover:bg-teal-700">
-              Contribution
-            </button>
           </div>
-        </div>
-      </div>
+        )}
+      </main>
     </div>
-  );
+  )
+}
 
-
+function TabButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: React.ReactNode
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
-      {currentPage === 'home' && <HomePage />}
-      {currentPage === 'circles' && <ActiveCirclesPage />}
-      {currentPage === 'wallet' && <WalletPage />}
-    </div>
-  );
-};
+    <button
+      onClick={onClick}
+      className={`flex items-center space-x-2 px-3 py-3 text-sm font-medium border-b-2 ${
+        active ? 'border-teal-600 text-teal-700' : 'border-transparent text-gray-600 hover:text-gray-900'
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  )
+}
 
-export default CircleSaveApp;
+function StatCard({ title, value, subtitle }: { title: string; value: number | string; subtitle?: string }) {
+  return (
+    <div className="bg-white shadow-sm rounded-xl p-4">
+      <p className="text-sm text-gray-500">{title}</p>
+      <p className="text-2xl font-semibold text-gray-900">{value}</p>
+      {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+    </div>
+  )
+}
+
+export default App

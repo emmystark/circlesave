@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-circle_save_contracts = "_"
+circle_save_contracts = "0xf0317ff7e99aa26e0800ac3008dee32fd89de078ee5c2a74fb15f9bc9b015e54"
 
 [dev-addresses]
 

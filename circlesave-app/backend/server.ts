@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import cors from 'cors'
 import path, { dirname } from 'path'
 import { fileURLToPath } from 'url'
 import authRoutes from './routes/authRoutes'
@@ -10,6 +11,16 @@ const __dirname = dirname(__filename)
 
 const app = express()
 const PORT = process.env.PORT ?? 3000
+
+// CORS so frontend on Vite (http://localhost:5173) can call this API
+const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:5173'
+app.use(
+  cors({
+    origin: allowedOrigin,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+)
 
 // Parse JSON bodies
 app.use(express.json())
